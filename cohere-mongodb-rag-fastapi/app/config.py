@@ -19,6 +19,9 @@ class Settings(BaseModel):
     dataset_name: str = os.getenv("DATASET_NAME", "MongoDB/fake_tech_companies_market_reports")
     dataset_split: str = os.getenv("DATASET_SPLIT", "train")
     dataset_limit: int = int(os.getenv("DATASET_LIMIT", "100"))
+    embed_batch_size: int = int(os.getenv("EMBED_BATCH_SIZE", "8"))
+    embed_max_retries: int = int(os.getenv("EMBED_MAX_RETRIES", "5"))
+    embed_retry_base_seconds: float = float(os.getenv("EMBED_RETRY_BASE_SECONDS", "2"))
 
 
 settings = Settings()

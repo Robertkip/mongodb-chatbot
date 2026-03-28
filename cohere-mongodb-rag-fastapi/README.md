@@ -89,3 +89,4 @@ curl -X POST http://127.0.0.1:8000/chat \
 - Use `search_document` for stored document embeddings.
 - Use `search_query` for user query embeddings.
 - If `$vectorSearch` fails, confirm the Atlas vector index exists and the dimensions match the embedding model.
+- If Cohere trial limits are tight, lower `DATASET_LIMIT` and/or `EMBED_BATCH_SIZE` in `.env`.

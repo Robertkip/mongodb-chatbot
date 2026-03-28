@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Any
 
 import cohere
+from cohere.errors import TooManyRequestsError
 from datasets import load_dataset
 import pandas as pd
 from tqdm import tqdm
@@ -38,20 +40,58 @@ def combine_attributes(row: pd.Series) -> str:
     return combined.strip()
 
 
-def get_embedding(text: str, input_type: str) -> list[float]:
+def embed_texts(texts: list[str], input_type: str) -> list[list[float]]:
     require_clients()
 
-    if not text.strip():
-        return []
+    non_empty_texts = [text for text in texts if text.strip()]
+    if not non_empty_texts:
+        return [[] for _ in texts]
 
-    response = co.embed(
-        model=settings.embed_model,
-        input_type=input_type,
-        embedding_types=["float"],
-        texts=[text],
-    )
+    attempt = 0
+    while True:
+        try:
+            response = co.embed(
+                model=settings.embed_model,
+                input_type=input_type,
+                embedding_types=["float"],
+                texts=non_empty_texts,
+            )
+            embeddings = response.embeddings.float_
+            output: list[list[float]] = []
+            emb_idx = 0
+            for text in texts:
+                if text.strip():
+                    output.append(embeddings[emb_idx])
+                    emb_idx += 1
+                else:
+                    output.append([])
+            return output
+        except TooManyRequestsError:
+            attempt += 1
+            if attempt > settings.embed_max_retries:
+                raise
+            delay = settings.embed_retry_base_seconds * (2 ** (attempt - 1))
+            print(
+                f"Cohere rate limit hit while embedding batch; retrying in {delay:.1f}s "
+                f"(attempt {attempt}/{settings.embed_max_retries})"
+            )
+            time.sleep(delay)
 
-    return response.embeddings.float_[0]
+
+def get_embedding(text: str, input_type: str) -> list[float]:
+    return embed_texts([text], input_type)[0]
+
+
+def generate_document_embeddings(texts: list[str]) -> list[list[float]]:
+    embeddings: list[list[float]] = []
+    batch_size = max(1, settings.embed_batch_size)
+
+    for start in tqdm(range(0, len(texts), batch_size), desc="Generating embeddings"):
+        batch = texts[start : start + batch_size]
+        batch_embeddings = embed_texts(batch, "search_document")
+        embeddings.extend(batch_embeddings)
+
+    return embeddings
 
 
 def load_market_reports_dataset(limit: int | None = None) -> pd.DataFrame:
@@ -69,10 +109,8 @@ def load_market_reports_dataset(limit: int | None = None) -> pd.DataFrame:
     size = limit or settings.dataset_limit
     dataset_df = pd.DataFrame(dataset.take(size))
     dataset_df["combined_attributes"] = dataset_df.apply(combine_attributes, axis=1)
-
-    tqdm.pandas(desc="Generating embeddings")
-    dataset_df["embedding"] = dataset_df["combined_attributes"].progress_apply(
-        lambda text: get_embedding(text, "search_document")
+    dataset_df["embedding"] = generate_document_embeddings(
+        dataset_df["combined_attributes"].tolist()
     )
     return dataset_df
 
